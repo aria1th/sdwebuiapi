@@ -197,7 +197,7 @@ class WebUIApi:
                 baseurl = f"https://{host}:{port}/sdapi/v1"
             else:
                 baseurl = f"http://{host}:{port}/sdapi/v1"
-
+        self.real_url = baseurl.split('/sdapi/v1')[0]
         self.baseurl = baseurl
         self.default_sampler = sampler
         self.default_steps = steps
@@ -530,6 +530,58 @@ class WebUIApi:
             async with session.post(url, json=json, auth=auth) as response:
                 return await self._to_api_result_async(response)
 
+    def upload_lora(self, lora_file_path, lora_target_path:str=""):
+        """
+        Upload lora model to server.
+        example:
+        lora_file_path = "lora.pt"
+        lora_target_path = 'folder_name"
+        """
+        target_url = self.real_url + "/upload_lora_model"
+        import os
+        assert os.path.exists(lora_file_path), "lora file not found at " + lora_file_path
+        files = {'file': open(lora_file_path, 'rb')}
+        data = {}
+        if lora_target_path != "":
+            data["lora_path"] = lora_target_path
+        self.session.post(target_url, files=files, data=data)
+        
+    def upload_sd_model(self, sd_file_path, sd_target_path:str=""):
+        # /upload_sd_model
+        
+        target_url = self.real_url + "/upload_sd_model"
+        import os
+        assert os.path.exists(sd_file_path), "sd file not found at " + sd_file_path
+        files = {'file': open(sd_file_path, 'rb')}
+        data = {}
+        if sd_target_path != "":
+            data["sd_path"] = sd_target_path
+        self.session.post(target_url, files=files, data=data)
+        
+    def upload_vae_model(self, vae_file_path, vae_target_path:str=""):
+        # /upload_vae_model
+        
+        target_url = self.real_url + "/upload_vae_model"
+        import os
+        assert os.path.exists(vae_file_path), "vae file not found at " + vae_file_path
+        files = {'file': open(vae_file_path, 'rb')}
+        data = {}
+        if vae_target_path != "":
+            data["vae_path"] = vae_target_path
+        self.session.post(target_url, files=files, data=data)
+        
+    def query_hash_all(self, subpath:str=""):
+        # /models/query_hash_sd_all
+        target_url = self.real_url + "/models/query_hash_all"
+        # post path=subpath
+        payload = {"path": subpath}
+        result = self.session.post(target_url, json=payload)
+        # curl -X POST -H "Content-Type: application/json" -d "{\"path\":\""}" http://127.0.0.1:7860/models/query_hash_sd_all
+        result_json = result.json()
+        if result.status_code != 200:
+            raise RuntimeError(result.status_code, result.text)
+        return result_json
+        
     def img2img(
         self,
         images=[],  # list of PIL Image
