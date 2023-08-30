@@ -1,3 +1,4 @@
+from collections import defaultdict
 import json
 import requests
 import io
@@ -8,93 +9,6 @@ from enum import Enum
 from typing import List, Dict, Any
 import uuid
 import threading
-
-class MultiAPIController:
-    def __init__(self, apis: List[WebUIApi], sleep_interval=0.1):
-        self.apis = apis
-        self.sleep_interval = sleep_interval
-        self.queue = defaultdict(dict) #txt2img, img2img, txt2img_task
-        self.results = {}
-        self._start_queue_thread()
-        
-    def generate_uuid(self):
-        return str(uuid.uuid4())
-        
-    def wait_until_finished(self):
-        while True:
-            for api in self.apis:
-                if api.is_ready():
-                    return
-            time.sleep(self.sleep_interval)
-        
-    def get_any_ready_api(self):
-        for api in self.apis:
-            if self.is_ready(api):
-                return api
-        return None
-    
-    def get_result(self, task_id):
-        if task_id not in self.results.keys():
-            raise RuntimeError(f"task id {task_id} is not found in results")
-        return self.results[task_id]
-    
-    def _start_queue_thread(self):
-        def queue_thread():
-            while True:
-                for api in self.apis:
-                    if self.is_ready(api):
-                        if len(self.queue["txt2img"]) > 0:
-                            task_id, (args, kwargs) = self.queue["txt2img"].popitem()
-                            self.results[task_id] = api.txt2img(*args, **kwargs)
-                        elif len(self.queue["txt2img_task"]) > 0:
-                            task_id, (args, kwargs) = self.queue["txt2img_task"].popitem()
-                            self.results[task_id] = api.txt2img_task(*args, **kwargs)
-                        elif len(self.queue["img2img"]) > 0:
-                            task_id, (args, kwargs) = self.queue["img2img"].popitem()
-                            self.results[task_id] = api.img2img(*args, **kwargs)
-                time.sleep(self.sleep_interval)
-        threading.Thread(target=queue_thread).start()
-            
-            
-    def is_ready(self, api:WebUIApi):
-        api_result = api.get_progress()
-        progress = api_result["progress"]
-        job_count = api_result["state"]["job_count"]
-        return progress == 0.0 and job_count == 0
-    
-    def txt2img(self, *args, **kwargs):
-        while True:
-            self.wait_until_finished()
-            ready_api = self.get_any_ready_api()
-            if ready_api is None:
-                continue
-            return ready_api.txt2img(*args, **kwargs)
-        
-    def txt2img_task(self, *args, **kwargs):
-        while True:
-            self.wait_until_finished()
-            ready_api = self.get_any_ready_api()
-            if ready_api is None:
-                continue
-            return ready_api.txt2img_task(*args, **kwargs)
-        
-    def img2img(self, *args, **kwargs):
-        while True:
-            self.wait_until_finished()
-            ready_api = self.get_any_ready_api()
-            if ready_api is None:
-                continue
-            return ready_api.img2img(*args, **kwargs)
-        
-    def queue_txt2img(self, *args, **kwargs):
-        self.queue["txt2img"][self.generate_uuid()] = (args, kwargs)
-        
-    def queue_txt2img_task(self, *args, **kwargs):
-        self.queue["txt2img_task"][self.generate_uuid()] = (args, kwargs)
-        
-    def queue_img2img(self, *args, **kwargs):
-        self.queue["img2img"][self.generate_uuid()] = (args, kwargs)
-        
 
         
 
@@ -1502,3 +1416,93 @@ class ControlNetInterface:
     def model_list(self):
         r = self.api.custom_get("controlnet/model_list")
         return r["model_list"]
+    
+
+class MultiAPIController:
+    def __init__(self, apis: List[WebUIApi], sleep_interval=0.1):
+        self.apis = apis
+        self.sleep_interval = sleep_interval
+        self.queue = defaultdict(dict) #txt2img, img2img, txt2img_task
+        self.results = {}
+        self._start_queue_thread()
+        
+    def generate_uuid(self):
+        return str(uuid.uuid4())
+        
+    def wait_until_finished(self):
+        import time
+        while True:
+            for api in self.apis:
+                if api.is_ready():
+                    return
+            time.sleep(self.sleep_interval)
+        
+    def get_any_ready_api(self):
+        for api in self.apis:
+            if self.is_ready(api):
+                return api
+        return None
+    
+    def get_result(self, task_id):
+        if task_id not in self.results.keys():
+            raise RuntimeError(f"task id {task_id} is not found in results")
+        return self.results[task_id]
+    
+    def _start_queue_thread(self):
+        def queue_thread():
+            import time
+            while True:
+                for api in self.apis:
+                    if self.is_ready(api):
+                        if len(self.queue["txt2img"]) > 0:
+                            task_id, (args, kwargs) = self.queue["txt2img"].popitem()
+                            self.results[task_id] = api.txt2img(*args, **kwargs)
+                        elif len(self.queue["txt2img_task"]) > 0:
+                            task_id, (args, kwargs) = self.queue["txt2img_task"].popitem()
+                            self.results[task_id] = api.txt2img_task(*args, **kwargs)
+                        elif len(self.queue["img2img"]) > 0:
+                            task_id, (args, kwargs) = self.queue["img2img"].popitem()
+                            self.results[task_id] = api.img2img(*args, **kwargs)
+                time.sleep(self.sleep_interval)
+        threading.Thread(target=queue_thread).start()
+            
+            
+    def is_ready(self, api:WebUIApi):
+        api_result = api.get_progress()
+        progress = api_result["progress"]
+        job_count = api_result["state"]["job_count"]
+        return progress == 0.0 and job_count == 0
+    
+    def txt2img(self, *args, **kwargs):
+        while True:
+            self.wait_until_finished()
+            ready_api = self.get_any_ready_api()
+            if ready_api is None:
+                continue
+            return ready_api.txt2img(*args, **kwargs)
+        
+    def txt2img_task(self, *args, **kwargs):
+        while True:
+            self.wait_until_finished()
+            ready_api = self.get_any_ready_api()
+            if ready_api is None:
+                continue
+            return ready_api.txt2img_task(*args, **kwargs)
+        
+    def img2img(self, *args, **kwargs):
+        while True:
+            self.wait_until_finished()
+            ready_api = self.get_any_ready_api()
+            if ready_api is None:
+                continue
+            return ready_api.img2img(*args, **kwargs)
+        
+    def queue_txt2img(self, *args, **kwargs):
+        self.queue["txt2img"][self.generate_uuid()] = (args, kwargs)
+        
+    def queue_txt2img_task(self, *args, **kwargs):
+        self.queue["txt2img_task"][self.generate_uuid()] = (args, kwargs)
+        
+    def queue_img2img(self, *args, **kwargs):
+        self.queue["img2img"][self.generate_uuid()] = (args, kwargs)
+        
