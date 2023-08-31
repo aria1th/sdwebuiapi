@@ -578,7 +578,7 @@ class WebUIApi:
     def upload_textual_inversion(self, textual_inversion_file_path, textual_inversion_target_path:str=""):
         # /upload_textual_inversion
         
-        target_url = self.real_url + "/upload_textual_inversion"
+        target_url = self.real_url + "/upload_embedding"
         import os
         assert os.path.exists(textual_inversion_file_path), "textual_inversion file not found at " + textual_inversion_file_path
         files = {'file': open(textual_inversion_file_path, 'rb')}
@@ -590,13 +590,14 @@ class WebUIApi:
     def upload_dynamic_prompts(self, dynamic_prompts_file_path, dynamic_prompts_target_path:str=""):
         # /upload/dynamic_prompts
         
-        target_url = self.real_url + "/upload/dynamic_prompts"
+        target_url = self.real_url + "/upload_dynamic_prompts"
         import os
         assert os.path.exists(dynamic_prompts_file_path), "dynamic_prompts file not found at " + dynamic_prompts_file_path
-        files = {'file': open(dynamic_prompts_file_path, 'rb')}
+        #curl -X POST -F "text=@C:\\Users\\UserName\\Downloads\\test.txt" -F "path=dynamic_prompts/test.txt" http://localhost:7860/upload_dynamic_prompts
+        files = {'text': open(dynamic_prompts_file_path, 'rb')}
         data = {}
         if dynamic_prompts_target_path != "":
-            data["dynamic_prompts_path"] = dynamic_prompts_target_path
+            data["path"] = dynamic_prompts_target_path
         return self.session.post(target_url, files=files, data=data)
         
         
