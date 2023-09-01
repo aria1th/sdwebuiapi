@@ -599,7 +599,42 @@ class WebUIApi:
         if dynamic_prompts_target_path != "":
             data["path"] = dynamic_prompts_target_path
         return self.session.post(target_url, files=files, data=data)
+    
+    def remove_sd_model(self, sd_target_path:str=""):
+        # /remove_sd_model
         
+        target_url = self.real_url + "/delete/sd_model"
+        data = {}
+        if sd_target_path != "":
+            data["model_path"] = sd_target_path
+        return self.session.post(target_url, data=data)
+    
+    def remove_lora_model(self, lora_target_path:str=""):
+        # /remove_lora_model
+        
+        target_url = self.real_url + "/delete/lora_model"
+        data = {}
+        if lora_target_path != "":
+            data["model_path"] = lora_target_path
+        return self.session.post(target_url, data=data)
+    
+    def remove_vae_model(self, vae_target_path:str=""):
+        # /remove_vae_model
+        
+        target_url = self.real_url + "/delete/vae_model"
+        data = {}
+        if vae_target_path != "":
+            data["model_path"] = vae_target_path
+        return self.session.post(target_url, data=data)
+    
+    def remove_textual_inversion(self, textual_inversion_target_path:str=""):
+        # /remove_textual_inversion
+        
+        target_url = self.real_url + "/delete/embedding"
+        data = {}
+        if textual_inversion_target_path != "":
+            data["model_path"] = textual_inversion_target_path
+        return self.session.post(target_url, data=data)
         
     def query_hash_all(self, subpath:str=""):
         # /models/query_hash_sd_all
