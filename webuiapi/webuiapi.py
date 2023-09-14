@@ -625,6 +625,14 @@ class WebUIApi:
             result_error = result.text
             raise RuntimeError("target_api_address is not running uploader, " + str(result.status_code) + " " + result_error)
         
+    def request_download_controlnets(self, model_type:str = 'v11'):
+        # model type can be 'v11' or 'xl'
+        # /download_controlnet_models/v11
+        # curl -X POST http://127.0.0.1:7860/download_controlnet_models/v11
+        target_url = self.real_url + "/download_controlnet_models/" + model_type
+        return self.session.post(target_url) # no data
+        
+        
     def send_single_sync_request(self, target_api_address:str, target_auth:str, model_type:str, model_path:str=""):
         """
         Sends single model sync request to target_api_address
