@@ -6,7 +6,7 @@ import base64
 from PIL import Image, PngImagePlugin
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 import threading
 
@@ -55,7 +55,46 @@ class WebUIApiResult:
     def get_image(self):
         return self.images[0]
     
-class QueuedTaskResult:
+    def get_images(self):
+        return self.images
+
+
+class Waitable:
+    """
+    Waitable class which implements .wait(timeout) function
+    """
+    terminated: bool = False
+    def check_finished(self, check_delay:int = 5):
+        """
+        check if task is finished
+        Modifies self.terminated
+        """
+        raise NotImplementedError
+    def wait(self, timeout:float = None):
+        """
+        Wait until terminated is True
+        This function locks the thread until terminated is True
+        """
+        if timeout is None:
+            while not self.terminated:
+                try:
+                    self.check_finished()
+                except Exception as exc:
+                    print("Exception in wait", exc)
+                    continue
+        else:
+            import time
+            start_time = time.time()
+            while not self.terminated:
+                self.check_finished()
+                if time.time() - start_time > timeout:
+                    raise TimeoutError("wait timed out")
+
+class QueuedTaskResult(Waitable):
+    """
+    QueuedTaskResult class which implements .wait(timeout) function
+    This is created from agent scheduler results
+    """
     task_id: str
     task_address: str # address to get task status
     image: str = ""# base64 encoded image
@@ -71,7 +110,13 @@ class QueuedTaskResult:
         self.expect_rate_limit = True
         self.session = session if session else requests.Session()
 
-    def get_image(self):
+    def get_image(self, wait:bool=False, timeout:float=1) -> Optional[Image.Image]:
+        """
+        Returns single image (first) from task
+        Returns None if task is not finished
+        """
+        if wait:
+            self.wait(timeout)
         self.check_finished()
         if not self.terminated:
             return None
@@ -79,7 +124,12 @@ class QueuedTaskResult:
             self.cached_image = Image.open(io.BytesIO(base64.b64decode(self.image.split(',')[-1])))
         return self.cached_image
     
-    def get_images(self):
+    def get_images(self, wait:bool=False, timeout:float=1) -> Optional[List[Image.Image]]:
+        """
+        Returns all images from task
+        """
+        if wait:
+            self.wait(timeout)
         self.check_finished()
         if not self.terminated:
             return None
@@ -97,6 +147,39 @@ class QueuedTaskResult:
         self.check_finished()
         return self.terminated
     
+    def task_status(self):
+        """
+        Returns task status, one of "pending", "running", "done", "failed"(others)
+        """
+        endpoint = self.task_address + f"/agent-scheduler/v1/task/{self.task_id}/position"
+        # GET
+        response = self.session.get(endpoint)
+        # returns {"success" : bool, "data" : {"status" : ..., "position" : int}}
+        if response.status_code != 200:
+            raise RuntimeError("task status is not found, " +str(response.status_code), response.text)
+        # get status
+        json_response = response.json()
+        # if position is not null, then it is pending
+        if json_response["data"]["position"] is not None:
+            return "pending"
+        return response.json()["data"]["status"]
+
+    def task_position(self):
+        """
+        Returns queue position
+        Returns -1 if task is done or failed
+        """
+        endpoint = self.task_address + f"/agent-scheduler/v1/task/{self.task_id}/position"
+        # GET
+        response = self.session.get(endpoint)
+        # returns {"success" : bool, "data" : {"status" : ..., "position" : int}}
+        if response.status_code != 200:
+            raise RuntimeError("task status is not found, " +str(response.status_code), response.text)
+        # get status
+        json_response = response.json()
+        # if position is not null, then it is pending
+        return json_response["data"]["position"]
+
     def check_finished(self, check_delay:int = 5):
         """
         check if task is finished
@@ -109,36 +192,23 @@ class QueuedTaskResult:
             # it should return {"current_task_id" : str, "pending_tasks" : [{"api_task_id" : str}]}
             # if self.task_id is found in any of pending tasks or current_task_id, then it is not finished
             # else, find /agent-scheduler/v1/results/{task_id}
-            response = self.session.get(self.task_address + "/agent-scheduler/v1/queue") 
-            try:
-                req_json = response.json()
-            except json.JSONDecodeError as exc:
-                if self.expect_rate_limit: # if rate limit is expected, then return False
-                    return False
-                raise RuntimeError("failed to parse json from " + self.task_address + "/agent-scheduler/v1/queue" +
-                                   f", {response.status_code}, {response.text}") from exc
-            if 'current_task_id' not in req_json.keys() or 'pending_tasks' not in req_json.keys():
-                raise RuntimeError(f"Parsed json from {self.task_address + '/agent-scheduler/v1/queue'} does not contain 'current_task_id' or 'pending_tasks', {response.status_code}, {response.text}")
-            if self.task_id == req_json.get('current_task_id', None): # if current task is self.task_id, then return False
+            # check task status
+            task_status_result = self.task_status()
+            if task_status_result not in ["done", "pending", "running"]:
+                raise RuntimeError(f"task id {self.task_id} has failed, " +str(task_status_result))
+            if task_status_result == "pending":
                 return False
-            elif any((self.task_id == task["api_task_id"] for task in req_json["pending_tasks"])):
+            elif task_status_result == "running":
                 return False
             else:
-                self._wait_between_calls(check_delay)
-                result_response = self.session.get(self.task_address + "/agent-scheduler/v1/results/" + self.task_id)
-                if result_response.status_code != 200:
-                    raise RuntimeError(f"task id {self.task_id} is not found in queue or results, " +str(result_response.status_code), result_response.text)
-                if not result_response.json().get('success', False):
-                    # check 'Task is pending' or 'Task is running'
-                    if result_response.json().get('message', '') == 'Task is pending' or result_response.json().get('message', '') == 'Task is running':
-                        return False
-                    elif result_response.json().get('message', '') == 'Task not found' or result_response.json().get('message', '') == 'Task result is not available':
-                        raise ValueError(f"task id {self.task_id} has failed, " +str(result_response.status_code), result_response.text)
-                    else:
-                        raise RuntimeError(f"task id {self.task_id} has failed for unknown result, " +str(result_response.status_code), result_response.text)
-                self.image = result_response.json()['data'][0]['image']
-                self.images = [img['image'] for img in result_response.json()['data']]
-                self.infotexts = [img.get('infotext') for img in result_response.json()['data']]
+                # get results
+                endpoint = self.task_address + f"/agent-scheduler/v1/results/{self.task_id}"
+                # GET
+                response = self.session.get(endpoint)
+                response.raise_for_status()
+                response_json = response.json()
+                self.images = [img['image'] for img in response_json['data']]
+                self.infotexts = [img.get('infotext') for img in response_json['data']]
                 self.terminated = True
                 self.task_address = ""
                 return True
