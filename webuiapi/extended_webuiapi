@@ -1,0 +1,263 @@
+from webuiapi import *
+
+class ExtendedWebuiAPI(WebUIApi):
+
+    def txt2img_task(
+        self,
+        enable_hr=False,
+        denoising_strength=0.7,
+        firstphase_width=0,
+        firstphase_height=0,
+        hr_scale=2,
+        hr_upscaler=HiResUpscaler.Latent,
+        hr_second_pass_steps=0,
+        hr_resize_x=0,
+        hr_resize_y=0,
+        prompt="",
+        styles=list(),
+        seed=-1,
+        subseed=-1,
+        subseed_strength=0.0,
+        seed_resize_from_h=0,
+        seed_resize_from_w=0,
+        sampler_name=None,  # use this instead of sampler_index
+        batch_size=1,
+        n_iter=1,
+        steps=None,
+        cfg_scale=7.0,
+        width=512,
+        height=512,
+        restore_faces=False,
+        tiling=False,
+        do_not_save_samples=False,
+        do_not_save_grid=False,
+        negative_prompt="",
+        eta=1.0,
+        s_churn=0,
+        s_tmax=0,
+        s_tmin=0,
+        s_noise=1,
+        override_settings=dict(),
+        override_settings_restore_afterwards=True,
+        script_args=None,  # List of arguments for the script "script_name"
+        script_name=None,
+        send_images=True,
+        save_images=False,
+        alwayson_scripts=dict(),
+        controlnet_units: List[ControlNetUnit] = list(),
+        sampler_index=None,  # deprecated: use sampler_name
+        use_deprecated_controlnet=False,
+        use_async=False,
+        checkpoint_name=None,
+    ):
+        """
+        This function is similar to txt2img, but it returns a QueuedTaskResult instead of WebUIApiResult.
+        You can also pass checkpoint_name to use a specific checkpoint.
+        """
+        if sampler_index is None:
+            sampler_index = self.default_sampler
+        if sampler_name is None:
+            sampler_name = self.default_sampler
+        if steps is None:
+            steps = self.default_steps
+        if script_args is None:
+            script_args = []
+        payload = {
+            "enable_hr": enable_hr,
+            "hr_scale": hr_scale,
+            "hr_upscaler": hr_upscaler,
+            "hr_second_pass_steps": hr_second_pass_steps,
+            "hr_resize_x": hr_resize_x,
+            "hr_resize_y": hr_resize_y,
+            "denoising_strength": denoising_strength,
+            "firstphase_width": firstphase_width,
+            "firstphase_height": firstphase_height,
+            "prompt": prompt,
+            "styles": styles,
+            "seed": seed,
+            "subseed": subseed,
+            "subseed_strength": subseed_strength,
+            "seed_resize_from_h": seed_resize_from_h,
+            "seed_resize_from_w": seed_resize_from_w,
+            "batch_size": batch_size,
+            "n_iter": n_iter,
+            "steps": steps,
+            "cfg_scale": cfg_scale,
+            "width": width,
+            "height": height,
+            "restore_faces": restore_faces,
+            "tiling": tiling,
+            "do_not_save_samples": do_not_save_samples,
+            "do_not_save_grid": do_not_save_grid,
+            "negative_prompt": negative_prompt,
+            "eta": eta,
+            "s_churn": s_churn,
+            "s_tmax": s_tmax,
+            "s_tmin": s_tmin,
+            "s_noise": s_noise,
+            "override_settings": override_settings,
+            "override_settings_restore_afterwards": override_settings_restore_afterwards,
+            "sampler_name": sampler_name,
+            "sampler_index": sampler_index,
+            "script_name": script_name,
+            "script_args": script_args,
+            "send_images": send_images,
+            "save_images": save_images,
+            "alwayson_scripts": alwayson_scripts,
+        }
+        if checkpoint_name is not None:
+            payload["checkpoint_name"] = checkpoint_name
+
+        if use_deprecated_controlnet:
+            raise RuntimeError("use_deprecated_controlnet is not supported for txt2img_task")
+        if controlnet_units and len(controlnet_units) > 0:
+            payload["alwayson_scripts"]["ControlNet"] = {
+                "args": [x.to_dict() for x in controlnet_units]
+            }
+        elif self.has_controlnet:
+            # workaround : if not passed, webui will use previous args!
+            payload["alwayson_scripts"]["ControlNet"] = {"args": []}
+        #print(payload)
+        return self.post_and_get_api_result(
+            f"{self.baseurl.split('/sdapi/v1')[0]}" + "/agent-scheduler/v1/queue/txt2img", payload, use_async
+        )
+        
+    def resume_agent_scheduler(self):
+        # post agent-scheduler/v1/queue/resume
+        target_url = self.baseurl.split('/sdapi/v1')[0] + "/agent-scheduler/v1/queue/resume"
+        return self.session.post(target_url)
+    
+    def pause_agent_scheduler(self):
+        # post agent-scheduler/v1/queue/pause
+        target_url = self.baseurl.split('/sdapi/v1')[0] + "/agent-scheduler/v1/queue/pause"
+        return self.session.post(target_url)
+    def _to_api_result(self, response):
+        if response.status_code != 200:
+            raise RuntimeError(response.status_code, response.text)
+
+        r = response.json()
+        # if {"task_id" : "string"} format, wrap 
+        if "task_id" in r.keys():
+            # remove '/sdapi/v1' from baseurl
+            task_address = self.baseurl.split('/sdapi/v1')[0]
+            return QueuedTaskResult(r["task_id"], task_address=task_address, session=self.session)
+        images = []
+        if "images" in r.keys():
+            images = [Image.open(io.BytesIO(base64.b64decode(i))) for i in r["images"]]
+        elif "image" in r.keys():
+            images = [Image.open(io.BytesIO(base64.b64decode(r["image"])))]
+
+        info = ""
+        if "info" in r.keys():
+            try:
+                info = json.loads(r["info"])
+            except:
+                info = r["info"]
+        elif "html_info" in r.keys():
+            info = r["html_info"]
+        elif "caption" in r.keys():
+            info = r["caption"]
+
+        parameters = ""
+        if "parameters" in r.keys():
+            parameters = r["parameters"]
+
+        return WebUIApiResult(images, parameters, info)
+    
+class QueuedTaskResult:
+    task_id: str
+    task_address: str # address to get task status
+    image: str = ""# base64 encoded image
+    images: List[str] = []
+    terminated: bool = False
+    cached_image: Image.Image = None
+    cached_images: List[Image.Image] = []
+    infotexts:list[str] = [] # list of infotexts for each image
+    
+    def __init__(self, task_id: str, task_address: str, session: requests.Session = None):
+        self.task_id = task_id
+        self.task_address = task_address
+        self.expect_rate_limit = True
+        self.session = session if session else requests.Session()
+
+    def get_image(self):
+        self.check_finished()
+        if not self.terminated:
+            return None
+        if self.cached_image is None:
+            self.cached_image = Image.open(io.BytesIO(base64.b64decode(self.image.split(',')[-1])))
+        return self.cached_image
+    
+    def get_images(self):
+        self.check_finished()
+        if not self.terminated:
+            return None
+        if not self.cached_images: # if empty
+            self.cached_images = [Image.open(io.BytesIO(base64.b64decode(img.split(',')[-1]))) for img in self.images]
+        return self.cached_images
+    
+    def is_finished(self):
+        """
+        Returns True if task is finished
+        Returns False if task is not finished
+        Throws RuntimeError if task is failed
+        Throws ValueError if task is not found
+        """
+        self.check_finished()
+        return self.terminated
+    
+    def check_finished(self, check_delay:int = 5):
+        """
+        check if task is finished
+        Throws RuntimeError if task is failed
+        Throws ValueError if task is not found
+        """
+        if not self.terminated:
+            # self.task_address is base address, /agent-scheduler should be added
+            # check /agent-scheduler/v1/queue
+            # it should return {"current_task_id" : str, "pending_tasks" : [{"api_task_id" : str}]}
+            # if self.task_id is found in any of pending tasks or current_task_id, then it is not finished
+            # else, find /agent-scheduler/v1/results/{task_id}
+            response = self.session.get(self.task_address + "/agent-scheduler/v1/queue") 
+            try:
+                response.raise_for_status()
+                req_json = response.json()
+            except json.JSONDecodeError as exc:
+                if self.expect_rate_limit: # if rate limit is expected, then return False
+                    return False
+                raise RuntimeError("failed to parse json from " + self.task_address + "/agent-scheduler/v1/queue" +
+                                   f", {response.status_code}, {response.text}") from exc
+            except Exception as exc:
+                raise RuntimeError("failed to get " + self.task_address + "/agent-scheduler/v1/queue" +
+                                   f", {response.status_code}, {response.text}") from exc
+            if 'current_task_id' not in req_json.keys() or 'pending_tasks' not in req_json.keys():
+                raise RuntimeError(f"Parsed json from {self.task_address + '/agent-scheduler/v1/queue'} does not contain 'current_task_id' or 'pending_tasks', {response.status_code}, {response.text}")
+            if self.task_id == req_json.get('current_task_id', None): # if current task is self.task_id, then return False
+                return False
+            elif any((self.task_id == task["api_task_id"] for task in req_json["pending_tasks"])):
+                return False
+            else:
+                self._wait_between_calls(check_delay)
+                result_response = self.session.get(self.task_address + "/agent-scheduler/v1/results/" + self.task_id)
+                if result_response.status_code != 200:
+                    raise RuntimeError(f"task id {self.task_id} is not found in queue or results, " +str(result_response.status_code), result_response.text)
+                if not result_response.json().get('success', False):
+                    # check 'Task is pending' or 'Task is running'
+                    if result_response.json().get('message', '') == 'Task is pending' or result_response.json().get('message', '') == 'Task is running':
+                        return False
+                    elif result_response.json().get('message', '') == 'Task not found' or result_response.json().get('message', '') == 'Task result is not available':
+                        raise ValueError(f"task id {self.task_id} has failed, " +str(result_response.status_code), result_response.text)
+                    else:
+                        raise RuntimeError(f"task id {self.task_id} has failed for unknown result, " +str(result_response.status_code), result_response.text)
+                self.image = result_response.json()['data'][0]['image']
+                self.images = [img['image'] for img in result_response.json()['data']]
+                self.infotexts = [img.get('infotext') for img in result_response.json()['data']]
+                self.terminated = True
+                self.task_address = ""
+                return True
+        else:
+            return True
+        
+    def _wait_between_calls(self, seconds=1):
+        import time
+        time.sleep(seconds)
